@@ -1,0 +1,21 @@
+services:
+  localstack:
+    container_name: localstack-main
+    image: localstack/localstack
+    ports:
+      - "0.0.0.0:4566:4566" # LocalStack Gateway (Accessible from your Mac)
+      - "0.0.0.0:4510-4559:4510-4559" # External services port range
+
+      # for local
+      # - "127.0.0.1:4566:4566" # LocalStack Gateway
+      # - "127.0.0.1:4510-4559:4510-4559" # external
+    environment:
+      - DEBUG=0
+      # Modern LocalStack uses "lazy loading", meaning services start automatically
+      # the moment you interact with them. However, you can explicitly restrict it
+      # to only your requested services to save RAM:
+      - SERVICES=s3,iam,lambda,apigateway,ec2
+    volumes:
+      - "./volume:/var/lib/localstack"
+      # Crucial: Allows LocalStack to spin up micro-containers for your Lambda executions
+      - "/var/run/docker.sock:/var/run/docker.sock"
