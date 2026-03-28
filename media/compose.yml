@@ -11,7 +11,7 @@ services:
       - TORRENTING_PORT=6881
     volumes:
       - ./qbittorrent:/config
-      - /data:/data
+      - /media:/media
     ports:
       - 8080:8080
       - 6881:6881
@@ -27,7 +27,7 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./nzbget:/config
-      - /data:/data
+      - /media:/media
     ports:
       - 6789:6789
     restart: unless-stopped
@@ -69,7 +69,7 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./sonarr:/config
-      - /data:/data
+      - /media:/media
     ports:
       - 8989:8989
 
@@ -84,7 +84,7 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./radarr:/config
-      - /data:/data
+      - /media:/media
     ports:
       - 7878:7878
 
@@ -95,7 +95,7 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./lidarr:/config
-      - /data:/data
+      - /media:/media
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
@@ -114,7 +114,7 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./bazarr:/config
-      - /data:/data
+      - /media:/media
     ports:
       - 6767:6767
 
