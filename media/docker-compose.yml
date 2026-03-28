@@ -136,17 +136,24 @@ services:
       - 1900:1900/udp
     restart: unless-stopped
 
-  jellyseerr:
-    container_name: jellyseerr
-    image: fallenbagel/jellyseerr:latest
+  seerr:
+    image: ghcr.io/seerr-team/seerr:latest
+    init: true
+    container_name: seerr
     environment:
-      - PUID=${PUID}
-      - PGID=${PGID}
+      - LOG_LEVEL=debug
       - TZ=${TZ}
-    volumes:
-      - ./jellyseerr:/app/config
+      - PORT=5055
     ports:
       - 5055:5055
+    volumes:
+      - ./seerr:/app/config
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:5055/api/v1/status || exit 1
+      start_period: 20s
+      timeout: 3s
+      interval: 15s
+      retries: 3
     restart: unless-stopped
 
   jellystat-db:
@@ -154,21 +161,22 @@ services:
     container_name: jellystat-db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: aqn8OPbMRksZfXtRx # You can change this if you want
+      POSTGRES_USER: ${JELLYSTAT_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${JELLYSTAT_POSTGRES_PASSWORD}
     volumes:
       - ./jellystat/postgres:/var/lib/postgresql/data
+    # No ports exposed needed, Jellystat connects internally
 
   jellystat:
     image: cyfershepard/jellystat:latest
     container_name: jellystat
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: aqn8OPbMRks # Make sure this matches the DB password above
-      POSTGRES_IP: jellystat-db
+      POSTGRES_USER: ${JELLYSTAT_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${JELLYSTAT_POSTGRES_PASSWORD}
+      POSTGRES_IP: jellystat-db # Reverted back to the container name
       POSTGRES_PORT: 5432
-      JWT_SECRET: "aqn8OPbMRksZfXtRxWZWuAjgH4snPXPE" # Change this to a random secure string
+      JWT_SECRET: ${JELLYSTAT_JWT_SECRET}
       TZ: ${TZ}
     volumes:
       - ./jellystat/backup-data:/app/backend/backup-data
