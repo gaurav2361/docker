@@ -8,7 +8,7 @@ services:
     restart: unless-stopped
     ports:
       - "17170:17170" # Web UI
-      - "3890:3890"   # LDAP Port
+      - "3890:3890" # LDAP Port
     volumes:
       - /docker/lldap/data:/data
     environment:
@@ -39,7 +39,7 @@ services:
       - media_net
 
   # -------------------------------------------
-  # NEXTEXPLORER (Marketing Web Bridge)
+  # NEXTEXPLORER (Web Bridge & Guest Access)
   # -------------------------------------------
   nextexplorer:
     image: nxzai/explorer:latest
