@@ -1,137 +1,120 @@
-# Serve: Enterprise Marketing Storage & Identity Stack
+# Serve: The Marketing Agency Master Identity & Storage Guide
 
-**Serve** is a professional-grade, self-hosted ecosystem designed for high-performance marketing agencies (20+ users). It unifies enterprise-level storage (Samba) with modern web identity (Google OAuth, SSO, and LLDAP).
-
----
-
-## 🏗️ Core Architecture: How It Works
-
-This stack is built on a "Source of Truth" model. Every asset enters the system through high-speed channels and is then automatically processed and presented to your team and clients.
-
-### The Asset Lifecycle
-1.  **Ingest (Samba):** A Senior Editor drops a 100GB 4K video directly onto the server via a native network drive.
-2.  **Optimize (Tdarr):** Tdarr detects the new file and automatically converts it to H.265 (HEVC), reducing the file size by 60% without losing marketing quality.
-3.  **Index (Immich):** The optimized video is instantly visible in the Immich gallery for the Social Media manager to review on their phone.
-4.  **Distribute (NextExplorer):** The manager creates a secure "Guest Link" in NextExplorer and sends it to the client for final approval.
-5.  **Identity (LLDAP/Authelia):** Throughout this entire process, everyone uses the same single set of credentials or their Google account.
+This manual defines the technical architecture of **Serve**, an enterprise-grade ecosystem tailored for 20+ users. It unifies high-performance storage (Samba) with a modern identity fabric (**LLDAP** + **Authelia OIDC**).
 
 ---
 
-## 👥 Team Structure & Permissions Matrix
+## 🏗️ Technical Architecture: The "Identity Fabric"
 
-With 20+ users, managing individual permissions is impossible. We use **LDAP Groups** to automate access.
+In this stack, **LLDAP** acts as the "Source of Truth" for all user data, while **Authelia** acts as the "Gatekeeper" that translates that data into modern web tokens (OIDC) for apps like NextExplorer and Immich.
 
-| Role | Example User | Samba (Direct Edit) | NextExplorer (Sharing) | Immich (Gallery) |
-| :--- | :--- | :--- | :--- | :--- |
-| **Admin** | `gaurav` | Full R/W Access | Manage All Shares | Full Admin |
-| **Editor** | `rahul_edit` | High-Speed R/W | Create Project Shares | View & Browse |
-| **Marketing** | `priya_social` | Read-Only | Use Existing Shares | Mobile Backup/View |
-| **Client** | `client_xyz` | No Access | Secure Link Only | No Access |
-
-### Day in the Life: Adding a New User
-When a new designer joins the team:
-1.  Log into **LLDAP** (`http://<IP>:17170`).
-2.  Create the user and add them to the `editors` group.
-3.  **Result:** They can instantly mount the Samba drive on their Mac AND log into the web gallery with the same password.
+### The Authentication Handshake
+1.  **User Login:** A team member clicks "Sign-in with SSO" on NextExplorer.
+2.  **OIDC Redirect:** NextExplorer redirects the user to **Authelia**.
+3.  **LDAP Verification:** Authelia pings **LLDAP** via the internal `media_net` to verify the username/password.
+4.  **Token Issuance:** Once verified, Authelia generates an OIDC Token containing the user's name, email, and **LDAP Groups**.
+5.  **Access Granted:** NextExplorer receives the token, sees the user belongs to the `editors` group, and grants them full project access.
 
 ---
 
-## 🌐 Modern Authentication (Google & Email)
+## 👥 Advanced User & Group Management
 
-### 1. Sign-in with Google (OAuth)
-Enable your team to skip password management by using their company Google accounts.
--   **Why:** Increases security (2FA) and simplifies onboarding for 20+ people.
--   **Setup:** 
-    1.  Create a project at [Google Cloud Console](https://console.cloud.google.com/).
-    2.  Create **OAuth 2.0 Credentials** (Web Application).
-    3.  Set Authorized Redirect URI to: `https://auth.yourdomain.com/api/oidc/authorization/google` (if using a domain) or `http://<IP>:9091/api/oidc/authorization/google`.
-    4.  Update `GOOGLE_CLIENT_ID` and `SECRET` in `.env`.
+For a 20+ user marketing agency, you should never manage permissions by "user." Always manage by **Group**.
 
-### 2. SMTP Email Notifications
-The "Heartbeat" of your identity system. This allows the server to communicate with your team.
--   **Password Resets:** If an editor forgets their password, they can reset it via email without bothering the admin.
--   **2FA Verification:** Send one-time codes to emails for extra security when logging in from new devices.
--   **Welcome Invites:** Automatically notify new team members when their accounts are ready.
--   **Setup:** Use your company Gmail/Outlook SMTP settings in the `.env` file. (For Gmail, you must use an "App Password").
+| LDAP Group | App Role | Samba Permissions | Marketing Workflow |
+| :--- | :--- | :--- | :--- |
+| `admins` | Superuser | Full Control (`/data`) | Server & User management |
+| `editors` | Power User | R/W Access (`/data`) | Direct 4K Video/RAW editing |
+| `marketing` | Web User | Read-Only | Distributing assets via NextExplorer |
+| `clients` | Guest | No Samba Access | Secure web links only |
 
 ---
 
-## 🚀 Step-by-Step Implementation
+## 🛡️ Deep Dive: OIDC & LDAP Configuration
 
-### Step 1: Host Preparation
-```bash
-# 1. Create the dual-root structure
-sudo mkdir -p /docker/{lldap/data,authelia/config,nextexplorer/{config,cache},tdarr/{server,configs},immich/{upload,postgres}}
-sudo mkdir -p /data
+### 1. Connecting Authelia to LLDAP (The Backend)
+Authelia must be configured to talk to the LLDAP container. In your `authelia/config/configuration.yml`, use these precise settings:
 
-# 2. Lock down permissions for 20+ users
-sudo chown -R gaurav:gaurav /docker /data
-sudo find /data -type d -exec chmod 775 {} \; # Group (Team) can write
-sudo find /data -type f -exec chmod 664 {} \; # Group (Team) can read
+```yaml
+authentication_backend:
+  ldap:
+    implementation: custom
+    address: 'ldap://lldap:3890'
+    base_dn: 'dc=marketing,dc=com'
+    additional_users_dn: 'ou=people'
+    users_filter: '(&({username_attribute}={input})(objectClass=person))'
+    additional_groups_dn: 'ou=groups'
+    groups_filter: '(&(member={dn})(objectClass=groupOfNames))'
+    user: 'uid=admin,ou=people,dc=marketing,dc=com'
+    password: 'YOUR_LDAP_ADMIN_PASSWORD'
+    attributes:
+      username: 'uid'
+      display_name: 'displayName'
+      mail: 'mail'
+      group_name: 'cn'
 ```
 
-### Step 2: Firewall (UFW) Configuration
-Marketing files are heavy; don't let a closed port slow down your editors.
-```bash
-sudo ufw allow 445/tcp    # Samba (Editing)
-sudo ufw allow 17170/tcp  # LLDAP (Identity Admin)
-sudo ufw allow 3000/tcp   # NextExplorer (Sharing)
-sudo ufw allow 9091/tcp   # Authelia (Login)
-sudo ufw allow 2283/tcp   # Immich (Gallery)
-sudo ufw reload
-```
+### 2. NextExplorer OIDC Integration
+NextExplorer is pre-configured in the `docker-compose.yml` to request the `groups` scope. This is vital for **Admin Elevation**.
 
-### Step 3: Unified Samba (The "Magic" Config)
-Instead of local users, Samba now asks LLDAP "Who is this?". Add this to `/etc/samba/smb.conf`:
-```ini
-[global]
-   passdb backend = ldapsam:ldap://localhost:3890
-   ldap suffix = dc=marketing,dc=com
-   ldap admin dn = cn=admin,dc=marketing,dc=com
-
-[Marketing_Assets]
-   path = /data
-   valid users = @editors, @admins
-   force group = gaurav
-   create mask = 0775
-```
+- **Admin Logic:** If a user in LLDAP belongs to the `admins` group, and `OIDC_ADMIN_GROUPS=admins` is set in the environment, NextExplorer will automatically promote that user to an Admin in the web UI.
 
 ---
 
-## ⚙️ Hardware Acceleration (Mac M4 & Server)
+## 🌐 Modern Auth: Google OAuth & SMTP
 
-### Server Optimization
-The `docker-compose.yml` is pre-configured with `/dev/dri` passthrough. If your Ubuntu server has an Intel/AMD GPU, Tdarr will use it to transcode marketing videos 10x faster than the CPU.
+### Sign-in with Google
+This allows your team to use their `company.com` Google accounts. 
+- **Requirement:** Your server MUST be accessible via a domain with HTTPS for Google to allow the redirect.
+- **Workflow:** When a user logs in via Google, Authelia verifies the email and maps it back to their LLDAP profile if the emails match.
 
-### Mac M4 Node (The "Nitro" Boost)
-If you have a massive batch of 4K RAW footage, fire up the Tdarr Node on your Mac M4:
+### SMTP (The Agency Heartbeat)
+- **Password Resets:** Essential for 20+ users. Without SMTP, the Admin has to manually reset every forgotten password.
+- **2FA:** Enables Time-based One-Time Passwords (TOTP) or email-based 2FA for sensitive marketing data.
+
+---
+
+## 🚀 Step-by-Step Server Setup
+
+### Step 1: Prepare the Identity Brain (LLDAP)
+1.  Run `docker compose up -d lldap`.
+2.  Access `http://<IP>:17170` (Admin / your password).
+3.  **Crucial:** Create your groups (`admins`, `editors`, `marketing`) **before** adding users.
+
+### Step 2: Unified Samba Setup
+To allow 20+ users to mount the server as a drive without manual Linux account creation:
+1.  Install LDAP tools: `sudo apt install libnss-ldap libpam-ldap ldap-utils -y`.
+2.  Update `/etc/samba/smb.conf` to use the `ldapsam` backend pointing to `localhost:3890`.
+
+### Step 3: Immich SSO Activation
+Immich requires a manual "First-Time" link in its GUI:
+1.  **Administration -> Settings -> OAuth**.
+2.  **Issuer URL:** `https://auth.marketingcompany.com` (or your local IP).
+3.  **Scope:** `openid email profile groups`.
+4.  **Auto Register:** ON (Enables instant onboarding for the whole team).
+
+---
+
+## ⚙️ Tdarr Nitro Boost (Mac M4 Node)
+For your video editors on M4 Macs, use this configuration in `Tdarr_Node_Config.json` to leverage the M4's Media Engine over the network:
+
 ```json
 {
-  "nodeName": "Lead-Editor-M4",
+  "nodeName": "Main-M4-Station",
   "serverIP": "<SERVER_IP>",
+  "serverPort": "8266",
   "pathTranslators": [
-    { "server": "/data", "node": "/Volumes/Marketing_Assets" }
+    {
+      "server": "/data",
+      "node": "/Volumes/Data"
+    }
   ]
 }
 ```
 
 ---
 
-## 🛠️ Maintenance & Troubleshooting
-
--   **Check Identity Logs:** `docker logs lldap`
--   **Check SSO Logs:** `docker logs authelia`
--   **Restart All:** `docker compose restart`
--   **Backups:** To backup the entire company setup, simply zip the `/docker` folder. Your `/data` assets should be backed up separately (RAID or Cloud).
-
----
-
-## 🔗 Connection Links Summary
-
-| Access Method | URL / Path |
-| :--- | :--- |
-| **Internal High-Speed Drive** | `smb://${LOCAL_IP}/Marketing_Assets` |
-| **Team Management (Admin)** | `http://${LOCAL_IP}:17170` |
-| **Asset Distribution (Web)** | `${PRIMARY_BASE_URL}:3000` |
-| **Client Gallery** | `${PRIMARY_BASE_URL}:2283` |
-| **Identity Portal** | `${PRIMARY_BASE_URL}:9091` |
+## 🛠️ Maintenance & Backup
+- **Identity Backup:** The file `/docker/lldap/data/users.db` is the most important file on your server. Back it up daily.
+- **Health Check:** If OIDC fails, check the Authelia logs: `docker logs authelia`.
+- **SSO Refresh:** If you add a user to a new group in LLDAP, they must log out and back into the web apps to refresh their OIDC "claims."
