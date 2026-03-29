@@ -6,8 +6,6 @@
 
 ## 🏗️ Architecture & Strategy: Why These Tools?
 
-Every component in this stack has been selected to solve a specific enterprise marketing challenge:
-
 1.  **Samba (The Heavy Lifter):** Native local file-sharing. Moves massive folders (100GB+) at maximum network speed directly from your Mac/Windows as a mounted drive. Essential for direct 4K video editing.
 2.  **NextExplorer (The Web Bridge):** Secure web interface for guest access. Share folders via URL without exposing your internal network or requiring complex VPNs for clients.
 3.  **Tdarr (The Optimizer):** Automated background robot that converts videos to H.265 (HEVC), saving terabytes of storage space with zero manual effort. Maintains high visual quality for marketing assets.
@@ -21,50 +19,54 @@ Every component in this stack has been selected to solve a specific enterprise m
 
 We maintain a strict separation of concerns to simplify backups and migrations:
 
--   **/docker:** Stores all persistent application data, configuration files, and databases.
--   **/data:** Stores all actual marketing assets (Photos, Projects, Final Renders).
-
----
-
-## 🔐 The Identity Fabric: OIDC + LDAP Deep-Dive
-
-Security is handled via a three-tier handshake that ensures a single set of credentials works everywhere.
-
-### 1. The LLDAP Backend
-LLDAP stores your 20+ users. 
--   **Technical Identity:** It uses a `dc=marketing,dc=com` base DN.
--   **Zero-Touch Samba:** The `ENABLE_SAMBA=true` flag forces LLDAP to generate the legacy NTLM hashes required by Samba. When you create a user in the Web UI, their network drive access is created automatically.
-
-### 2. The Authelia OIDC Gatekeeper
-Authelia translates LDAP data into modern OIDC tokens for NextExplorer and Immich.
--   **Connection Logic:** Authelia pings LLDAP via the internal `media_net` using custom filters to map LDAP groups into OIDC claims.
+- **/docker:** Stores all persistent application data, configuration files, and databases.
+- **/data:** Stores all actual marketing assets (Photos, Projects, Final Renders).
 
 ---
 
 ## 👥 Team Roles & Permissions Matrix
 
-We manage access via **Groups**, not individual users.
-
-| LDAP Group | App Role | Samba Access | Marketing Workflow |
-| :--- | :--- | :--- | :--- |
-| `admins` | Superuser | Full Control | Server & User Management |
-| `editors` | Power User | R/W Access | Direct 4K Video/RAW editing |
-| `marketing` | Web User | Read-Only | Distributing assets via NextExplorer |
-| `clients` | Guest | No Access | Secure web links only |
-
-### Onboarding Example: Senior Editor
-1.  **IT Step:** Create `rahul_edit` in LLDAP (`:17170`) and add to `editors` group.
-2.  **Outcome:** Rahul can instantly mount the Samba drive AND log into the media gallery with one password.
+| LDAP Group  | App Role   | Samba Access | Marketing Workflow                   |
+| :---------- | :--------- | :----------- | :----------------------------------- |
+| `admins`    | Superuser  | Full Control | Server & User Management             |
+| `editors`   | Power User | R/W Access   | Direct 4K Video/RAW editing          |
+| `marketing` | Web User   | Read-Only    | Distributing assets via NextExplorer |
+| `clients`   | Guest      | No Access    | Secure web links only                |
 
 ---
 
-## 🚀 Technical Implementation Guide
+## 🚀 Technical Implementation Guide (IT Runbook)
 
-### Step 1: Host Preparation & Firewall
+### Phase 1: Filesystem & Security Hardening
+
+First, establish the dual-root structure and generate the cryptographic secrets required for OIDC.
+
 ```bash
 # 1. Create directory structures
 sudo mkdir -p /docker/{lldap/data,authelia/config,nextexplorer/{config,cache},tdarr/{server,configs},immich/{upload,postgres}}
 sudo mkdir -p /data
+
+# 2. Set ownership (Assuming PUID/PGID 1000)
+sudo chown -R gaurav:gaurav /docker /data
+sudo find /data -type d -exec chmod 775 {} \;
+sudo find /data -type f -exec chmod 664 {} \;
+
+# 3. Generate Authelia Secrets (Critical for OIDC)
+# Run these and save the outputs for the configuration file at:
+# /docker/authelia/config/configuration.yml
+openssl rand -hex 64 # JWT_SECRET
+openssl rand -hex 64 # SESSION_SECRET
+openssl rand -hex 64 # STORAGE_ENCRYPTION_KEY
+```
+
+### Phase 2: Network & Identity Initialization
+
+Boot the identity core and configure the system firewall to allow internal/external traffic.
+
+```bash
+# 1. Deploy LLDAP
+# Configuration stored at: /docker/lldap/data/lldap_config.toml (Auto-generated on first run)
+docker compose up -d lldap
 
 # 2. Configure UFW (Ubuntu Firewall)
 sudo ufw allow 445/tcp    # Samba SMB
@@ -75,59 +77,82 @@ sudo ufw allow 2283/tcp   # Immich Gallery
 sudo ufw reload
 ```
 
-### Step 2: "Zero-Touch" Samba Configuration
-Update `/etc/samba/smb.conf` to point to the LLDAP container. This removes the need for `smbpasswd` manual entries.
+### Phase 3: "Zero-Touch" Samba Integration
+
+This step connects the Host OS to the LDAP container, enabling automatic network drive access for all 20+ users.
+
+1. **Install LDAP Client Utilities:**
+   `sudo apt update && sudo apt install libnss-ldap libpam-ldap ldap-utils -y`
+
+2. **Configure the host file at `/etc/samba/smb.conf`:**
 
 ```ini
 [global]
+   # Identity Backend
    passdb backend = ldapsam:ldap://localhost:3890
    ldap suffix = dc=marketing,dc=com
    ldap admin dn = cn=admin,dc=marketing,dc=com
    ldap ssl = off
 
-[Marketing_Assets]
+   # Optimization for 4K Video Editing
+   min receivefile size = 16384
+   use sendfile = yes
+   aio read size = 16384
+   aio write size = 16384
+
+[Drive]
    path = /data
    valid users = @editors, @admins
-   force user = gaurav
    force group = gaurav
    create mask = 0775
    directory mask = 0775
+   browseable = yes
+   writable = yes
 ```
 
-### Step 3: Authelia OIDC Integration
-In your Authelia `configuration.yml`, use these precise settings to bridge to LLDAP:
+### Phase 4: Web SSO & App Integration
+
+Bridge Authelia to LLDAP and enable the OIDC handshake for the marketing apps.
+
+1. **Authelia ↔ LLDAP Config Path:** `/docker/authelia/config/configuration.yml`
 
 ```yaml
 authentication_backend:
   ldap:
     implementation: custom
-    address: 'ldap://lldap:3890'
-    base_dn: 'dc=marketing,dc=com'
-    users_filter: '(&({username_attribute}={input})(objectClass=person))'
-    groups_filter: '(&(member={dn})(objectClass=groupOfNames))'
+    address: "ldap://lldap:3890"
+    base_dn: "dc=marketing,dc=com"
+    users_filter: "(&({username_attribute}={input})(objectClass=person))"
+    groups_filter: "(&(member={dn})(objectClass=groupOfNames))"
 ```
 
-### Step 4: NextExplorer & Immich (OIDC Handshake)
-NextExplorer uses **space-separated** scopes to automate permissions:
-```ini
-OIDC_SCOPES="openid profile email groups"
-OIDC_ADMIN_GROUPS=admins
+2. **App Deployment:**
+
+```bash
+# Execute in your project root (where docker-compose.yml lives)
+docker compose up -d
 ```
+
+3. **Immich SSO (Manual Finalization):**
+   - Log into Immich Web UI -> **Administration -> Settings -> OAuth**.
+   - Set **Issuer URL** to your Authelia domain/IP.
+   - Set **Scope** to `openid profile email groups`.
+   - Enable **Auto Register** to allow 20+ users to onboard instantly.
 
 ---
 
-## ⚙️ Nitro-Boost: Mac M4 Tdarr Node
-For video editors on M4 Macs, use **Path Translation** in `Tdarr_Node_Config.json` to leverage hardware acceleration over the network:
+## ⚙️ Nitro-Boost: Mac M4 Hardware Acceleration
+
+For editors on M4 Macs, download the Tdarr Node binary and edit its local configuration file (usually `Tdarr_Node_Config.json` in the unzipped folder):
 
 ```json
 {
-  "nodeName": "Editor-Station-M4",
+  "nodeName": "Lead-Editor-M4",
   "serverIP": "<SERVER_IP>",
-  "serverPort": "8266",
   "pathTranslators": [
     {
       "server": "/data",
-      "node": "/Volumes/Marketing_Assets"
+      "node": "/Volumes/Drive"
     }
   ]
 }
@@ -135,22 +160,20 @@ For video editors on M4 Macs, use **Path Translation** in `Tdarr_Node_Config.jso
 
 ---
 
-## 🛠️ Maintenance, Backups & Alerts
+## 🛠️ Maintenance & High Availability
 
--   **The "Golden" Backup:** The file `/docker/lldap/data/users.db` contains your entire company identity. Back it up daily.
--   **SMTP Alerts:** Configure the SMTP section in `.env` so IT receives email alerts for server health and login security.
--   **Logs:** 
-    - Identity issues: `docker logs lldap`
-    - Login issues: `docker logs authelia`
+- **Database Backups:** Use a cron job to backup the file at: `/docker/lldap/data/users.db`. If this file is lost, all 20+ users lose access.
+- **SSO Troubleshooting:** To view live authentication errors, run: `docker logs -f authelia`.
+- **Reverse Proxy:** For domain access (`media.marketingcompany.com`), use a proxy to point to the server's local ports.
 
 ---
 
 ## 🔗 Connection Summary
 
-| Access Method | URL / Path |
-| :--- | :--- |
-| **Samba (Internal Drive)** | `smb://${LOCAL_IP}/Marketing_Assets` |
-| **Identity Admin (LLDAP)** | `http://${LOCAL_IP}:17170` |
-| **Asset Bridge (NextExplorer)** | `${PRIMARY_BASE_URL}:3000` |
-| **Media Gallery (Immich)** | `${PRIMARY_BASE_URL}:2283` |
-| **SSO Identity Portal** | `${PRIMARY_BASE_URL}:9091` |
+| Service               | Protocol | URL / Path                           |
+| :-------------------- | :------- | :----------------------------------- |
+| **Asset Storage**     | SMB      | `smb://${LOCAL_IP}/Drive` |
+| **Team Directory**    | HTTP     | `http://${LOCAL_IP}:17170`           |
+| **Web Asset Bridge**  | HTTPS    | `${PRIMARY_BASE_URL}:3000`           |
+| **Marketing Gallery** | HTTPS    | `${PRIMARY_BASE_URL}:2283`           |
+| **Identity Portal**   | HTTPS    | `${PRIMARY_BASE_URL}:9091`           |
