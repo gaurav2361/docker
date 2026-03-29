@@ -1,40 +1,42 @@
 # Serve: The Marketing Agency Master Identity & Storage Guide
 
-This manual defines the technical architecture of **Serve**, an enterprise-grade ecosystem tailored for 20+ users. It unifies high-performance storage (Samba) with a modern identity fabric (**LLDAP** + **Authelia OIDC**).
+This manual defines the definitive technical architecture of **Serve**, an enterprise-grade ecosystem tailored for 20+ users. It unifies high-performance storage (Samba) with a robust identity fabric using **LLDAP** and **Authelia OIDC**.
 
 ---
 
-## 🏗️ Technical Architecture: The "Identity Fabric"
+## 🏗️ Technical Identity Fabric: The "Handshake"
 
-In this stack, **LLDAP** acts as the "Source of Truth" for all user data, while **Authelia** acts as the "Gatekeeper" that translates that data into modern web tokens (OIDC) for apps like NextExplorer and Immich.
+The security of your agency's assets relies on a dual-layer identity strategy. This ensures that every team member has a single identity for web apps while maintaining high-speed, secure access to the network drive.
 
-### The Authentication Handshake
-1.  **User Login:** A team member clicks "Sign-in with SSO" on NextExplorer.
-2.  **OIDC Redirect:** NextExplorer redirects the user to **Authelia**.
-3.  **LDAP Verification:** Authelia pings **LLDAP** via the internal `media_net` to verify the username/password.
-4.  **Token Issuance:** Once verified, Authelia generates an OIDC Token containing the user's name, email, and **LDAP Groups**.
-5.  **Access Granted:** NextExplorer receives the token, sees the user belongs to the `editors` group, and grants them full project access.
+### 1. The LLDAP Backend (Web Identity)
+**LLDAP** is the "Source of Truth" for your 20+ web users.
+- **Base DN:** `dc=marketing,dc=com`
+- **Role:** Authelia connects to LLDAP to provide **Single Sign-On (SSO)** for NextExplorer and Immich.
+
+### 2. The Samba Reality (Local Storage)
+**Samba** requires legacy NTLM hashes to authenticate users. Because LLDAP is a modern, lightweight directory, it does **not** store these hashes.
+- **The Strategy:** For maximum reliability, we use a "Dual-Management" approach. 
+- **The Workflow:** When you onboard a new editor, you create their account in the **LLDAP Web UI** (for web apps) and then run a single command on the **Ubuntu Server** (for the network drive).
 
 ---
 
-## 👥 Advanced User & Group Management
+## 👥 Unified Team Roles & Scopes
 
-For a 20+ user marketing agency, you should never manage permissions by "user." Always manage by **Group**.
+To manage 20+ users, we use **OIDC Scopes**. NextExplorer requests `openid profile email groups` to automate permissions.
 
-| LDAP Group | App Role | Samba Permissions | Marketing Workflow |
+| LDAP Group | OIDC Claim | Samba Access | NextExplorer Role |
 | :--- | :--- | :--- | :--- |
-| `admins` | Superuser | Full Control (`/data`) | Server & User management |
-| `editors` | Power User | R/W Access (`/data`) | Direct 4K Video/RAW editing |
-| `marketing` | Web User | Read-Only | Distributing assets via NextExplorer |
-| `clients` | Guest | No Samba Access | Secure web links only |
+| `admins` | `groups: admins` | Full R/W | **Superuser** (Auto-Elevated) |
+| `editors` | `groups: editors` | High-Speed R/W | **Editor** (Project Management) |
+| `marketing` | `groups: marketing` | Read-Only | **User** (Share Creation) |
+| `guests` | `groups: guests` | No Access | **Guest** (Link Access) |
 
 ---
 
-## 🛡️ Deep Dive: OIDC & LDAP Configuration
+## 🛡️ Deep Technical Configurations
 
-### 1. Connecting Authelia to LLDAP (The Backend)
-Authelia must be configured to talk to the LLDAP container. In your `authelia/config/configuration.yml`, use these precise settings:
-
+### 1. Authelia ↔ LLDAP Connection
+Authelia connects to LLDAP via the internal `media_net`. Use these precise settings:
 ```yaml
 authentication_backend:
   ldap:
@@ -45,53 +47,39 @@ authentication_backend:
     users_filter: '(&({username_attribute}={input})(objectClass=person))'
     additional_groups_dn: 'ou=groups'
     groups_filter: '(&(member={dn})(objectClass=groupOfNames))'
-    user: 'uid=admin,ou=people,dc=marketing,dc=com'
-    password: 'YOUR_LDAP_ADMIN_PASSWORD'
-    attributes:
-      username: 'uid'
-      display_name: 'displayName'
-      mail: 'mail'
-      group_name: 'cn'
 ```
 
-### 2. NextExplorer OIDC Integration
-NextExplorer is pre-configured in the `docker-compose.yml` to request the `groups` scope. This is vital for **Admin Elevation**.
-
-- **Admin Logic:** If a user in LLDAP belongs to the `admins` group, and `OIDC_ADMIN_GROUPS=admins` is set in the environment, NextExplorer will automatically promote that user to an Admin in the web UI.
-
----
-
-## 🌐 Modern Auth: Google OAuth & SMTP
-
-### Sign-in with Google
-This allows your team to use their `company.com` Google accounts. 
-- **Requirement:** Your server MUST be accessible via a domain with HTTPS for Google to allow the redirect.
-- **Workflow:** When a user logs in via Google, Authelia verifies the email and maps it back to their LLDAP profile if the emails match.
-
-### SMTP (The Agency Heartbeat)
-- **Password Resets:** Essential for 20+ users. Without SMTP, the Admin has to manually reset every forgotten password.
-- **2FA:** Enables Time-based One-Time Passwords (TOTP) or email-based 2FA for sensitive marketing data.
+### 2. NextExplorer OIDC Variables
+Based on industry standards, use **space-separated** scopes:
+```ini
+OIDC_ENABLED=true
+OIDC_ISSUER=https://auth.marketingcompany.com
+OIDC_CLIENT_ID=nextexplorer
+OIDC_SCOPES="openid profile email groups"
+OIDC_ADMIN_GROUPS=admins
+OIDC_AUTO_CREATE_USERS=true
+```
 
 ---
 
 ## 🚀 Step-by-Step Server Setup
 
-### Step 1: Prepare the Identity Brain (LLDAP)
+### Step 1: Initialize Identity (LLDAP)
 1.  Run `docker compose up -d lldap`.
 2.  Access `http://<IP>:17170` (Admin / your password).
-3.  **Crucial:** Create your groups (`admins`, `editors`, `marketing`) **before** adding users.
+3.  Create your team groups (`admins`, `editors`, `marketing`) and add your users.
 
-### Step 2: Unified Samba Setup
-To allow 20+ users to mount the server as a drive without manual Linux account creation:
-1.  Install LDAP tools: `sudo apt install libnss-ldap libpam-ldap ldap-utils -y`.
-2.  Update `/etc/samba/smb.conf` to use the `ldapsam` backend pointing to `localhost:3890`.
+### Step 2: Samba User Management (NTLM Hashes)
+To enable the network drive for a user created in LLDAP, you must sync their password to the Samba database once:
+```bash
+# Example: Adding 'rahul_edit' to the network drive
+sudo smbpasswd -a rahul_edit
+```
 
-### Step 3: Immich SSO Activation
-Immich requires a manual "First-Time" link in its GUI:
-1.  **Administration -> Settings -> OAuth**.
-2.  **Issuer URL:** `https://auth.marketingcompany.com` (or your local IP).
-3.  **Scope:** `openid email profile groups`.
-4.  **Auto Register:** ON (Enables instant onboarding for the whole team).
+### Step 3: Enable Web SSO
+1.  Run `docker compose up -d authelia nextexplorer`.
+2.  Team members click "Continue with SSO" and log in with their LLDAP credentials.
+3.  Users in the `admins` LDAP group are automatically promoted to NextExplorer Admins.
 
 ---
 
@@ -115,6 +103,18 @@ For your video editors on M4 Macs, use this configuration in `Tdarr_Node_Config.
 ---
 
 ## 🛠️ Maintenance & Backup
-- **Identity Backup:** The file `/docker/lldap/data/users.db` is the most important file on your server. Back it up daily.
-- **Health Check:** If OIDC fails, check the Authelia logs: `docker logs authelia`.
-- **SSO Refresh:** If you add a user to a new group in LLDAP, they must log out and back into the web apps to refresh their OIDC "claims."
+- **Identity Backup:** Back up `/docker/lldap/data/users.db` daily. This is the "brain" of your agency.
+- **SSO Refresh:** If you add a user to a new group in LLDAP, they must log out and back into the web apps to refresh their permissions.
+- **SMTP Alerts:** Ensure SMTP is configured in `.env` so you receive alerts for failed login attempts or server issues.
+
+---
+
+## 🔗 Connection Links Summary
+
+| Access Method | URL / Path |
+| :--- | :--- |
+| **Internal High-Speed Drive** | `smb://${LOCAL_IP}/Data` |
+| **Team Management (Admin)** | `http://${LOCAL_IP}:17170` |
+| **Asset Distribution (Web)** | `${PRIMARY_BASE_URL}:3000` |
+| **Media Gallery** | `${PRIMARY_BASE_URL}:2283` |
+| **Identity Portal** | `${PRIMARY_BASE_URL}:9091` |

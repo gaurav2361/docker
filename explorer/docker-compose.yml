@@ -8,7 +8,7 @@ services:
     restart: unless-stopped
     ports:
       - "17170:17170" # Web UI
-      - "3890:3890" # LDAP Port
+      - "3890:3890"   # LDAP Port
     volumes:
       - /docker/lldap/data:/data
     environment:
@@ -39,7 +39,7 @@ services:
       - media_net
 
   # -------------------------------------------
-  # NEXTEXPLORER (Web Bridge & Guest Access)
+  # NEXTEXPLORER (Marketing Web Bridge)
   # -------------------------------------------
   nextexplorer:
     image: nxzai/explorer:latest
@@ -62,6 +62,8 @@ services:
       OIDC_ISSUER: "${PRIMARY_BASE_URL}:9091"
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID}
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET}
+      # FIX: Industry-standard space-separated scopes
+      OIDC_SCOPES: "openid profile email groups"
       OIDC_AUTO_CREATE_USERS: "true"
       OIDC_ADMIN_GROUPS: "admins"
     depends_on:
@@ -129,7 +131,6 @@ services:
       - REDIS_HOSTNAME=immich-redis
       - TZ=${TZ}
     volumes:
-      # FIX: Moved upload folder to /docker to avoid nested scanning of /data
       - /docker/immich/upload:/usr/src/app/upload
       - /data:/mnt/Data:ro
     depends_on:
