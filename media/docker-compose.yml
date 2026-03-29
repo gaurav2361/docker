@@ -184,3 +184,17 @@ services:
       - 3000:3000
     depends_on:
       - jellystat-db
+
+  reiverr:
+    image: ghcr.io/aleksilassila/reiverr:latest
+    container_name: reiverr
+    ports:
+      - 9494:9494
+    environment:
+      - SECRET=PutARandomStringHere123
+    #  - ADMIN_USERNAME=admin # optional
+    #  - ADMIN_PASSWORD=admin # optional
+    volumes:
+      - ./reiverr:/config
+      - /media:/media
+    restart: unless-stopped

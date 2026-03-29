@@ -1,0 +1,34 @@
+services:
+  mediamanager:
+    container_name: mediamanager_server
+    image: quay.io/maxdorninger/mediamanager:latest
+
+    ports:
+      - "8000:8000"
+    environment:
+      - CONFIG_DIR=/app/config
+    volumes:
+      # Mount your actual media directories here - these paths should match your config.toml
+      - ./media/:/media/ # Example: change ./data/ to your actual media root
+      # Config folder for application configuration
+      - ./config/:/app/config/
+      # Image folder
+      - ./images/:/media/images/
+    depends_on:
+      db:
+        condition: service_healthy
+  db:
+    container_name: mediamanager_postgres
+    image: postgres:17
+    restart: unless-stopped
+    volumes:
+      - ./postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    environment:
+      POSTGRES_USER: MediaManager
+      POSTGRES_DB: MediaManager
+      POSTGRES_PASSWORD: MediaManager
