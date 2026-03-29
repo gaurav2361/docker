@@ -62,14 +62,22 @@ Edit `/etc/samba/smb.conf` and add to the bottom:
 ```
 `sudo systemctl restart smbd`.
 
-### Step 3: Create the `.env` File
-Create a `.env` file in the same directory as your `docker-compose.yml` and populate it with your secure credentials:
+### Step 3: Create the `.env` File (Dual Access Support)
+Create a `.env` file and populate it with your credentials. You can define both your **Local IP** and your **Domain** name.
 
 ```ini
 TZ=Asia/Kolkata
 PUID=1000
 PGID=1000
-SERVER_IP_OR_DOMAIN=192.168.1.XX
+
+# Network Configuration
+LOCAL_IP=192.168.1.XX
+DOMAIN=media.yourdomain.com
+
+# Active Identity (Which one the apps use for OIDC/Links)
+# Set to http://${LOCAL_IP} for home-only access
+# Set to https://${DOMAIN} for external/domain access (requires reverse proxy)
+PRIMARY_BASE_URL=http://${LOCAL_IP}
 
 # NextExplorer SSO
 OIDC_CLIENT_ID=nextexplorer
@@ -91,13 +99,25 @@ docker compose up -d
 
 ---
 
+## 🌐 Hybrid Access (IP & Domain)
+
+You can use both your **Local IP** and **Domain** simultaneously:
+
+1.  **Samba (Internal Only):** Always use your `LOCAL_IP` for mounting the drive on Mac/Windows. It provides the fastest speeds and doesn't rely on your internet connection.
+2.  **Web Apps (Internal/External):** 
+    - Use `PRIMARY_BASE_URL=http://${LOCAL_IP}` while setting things up.
+    - Switch to `PRIMARY_BASE_URL=https://${DOMAIN}` when you want to share links with guests or use SSO externally.
+    - **Note:** If you use a Domain, you must have a Reverse Proxy (Nginx Proxy Manager, Cloudflare Tunnels, etc.) pointing to the server's local ports.
+
+---
+
 ## 👥 User Management Examples
 
 ### 1. Creating a Samba User
 `sudo smbpasswd -a <username>`
 
 ### 2. Creating an Authelia User (SSO)
-First, generate a secure Argon2 hash for your password by running:
+First, generate a secure Argon2 hash for your password:
 `docker run --rm authelia/authelia:latest authelia crypto hash generate argon2 --password 'YourNewPassword'`
 
 Then, edit `/docker/authelia/config/users.yml` and paste the output:
@@ -105,7 +125,7 @@ Then, edit `/docker/authelia/config/users.yml` and paste the output:
 users:
   gaurav:
     displayname: "Gaurav"
-    password: "$argon2id$v=19$m=65536,t=3,p=4$..." # Paste your generated hash here
+    password: "$argon2id$v=19$m=65536,t=3,p=4$..." 
     email: gaurav@domain.com
     groups: [admins]
 ```
@@ -133,14 +153,11 @@ You must include **Path Translation** so your Mac knows how to map the Ubuntu se
 
 ---
 
-## 🔗 How to Connect via Samba
-**On Mac:** `Cmd + K` -> `smb://<SERVER_IP>/Shared_Media`  
-**On Windows:** Map Network Drive -> `\\<SERVER_IP>\Shared_Media`
+## 🔗 Connection Links Summary
 
----
-
-## 🛠 Web Access Links
-- **NextExplorer:** `http://<SERVER_IP>:3000`
-- **Immich:** `http://<SERVER_IP>:2283`
-- **Tdarr:** `http://<SERVER_IP>:8265`
-- **Authelia:** `http://<SERVER_IP>:9091`
+| Access Method | Link / Path |
+| :--- | :--- |
+| **Samba (Mac)** | `smb://${LOCAL_IP}/Shared_Media` |
+| **NextExplorer** | `${PRIMARY_BASE_URL}:3000` |
+| **Immich** | `${PRIMARY_BASE_URL}:2283` |
+| **Authelia** | `${PRIMARY_BASE_URL}:9091` |
