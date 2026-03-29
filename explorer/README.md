@@ -10,8 +10,9 @@
 2.  **NextExplorer (The Web Bridge):** Secure web interface for guest access. Share folders via URL without exposing your internal network or requiring complex VPNs for clients.
 3.  **Tdarr (The Optimizer):** Automated background robot that converts videos to H.265 (HEVC), saving terabytes of storage space with zero manual effort. Maintains high visual quality for marketing assets.
 4.  **Immich (The Gallery Experience):** High-performance Google Photos alternative with facial recognition and object detection. Provides a beautiful, searchable timeline for clients and stakeholders.
-5.  **Authelia (The Security Gatekeeper):** Single Sign-On (SSO) with OIDC support. One secure "front door" for all your web apps, eliminating password fatigue for your 20+ users.
-6.  **LLDAP (The Identity Brain):** A modern, lightweight LDAP directory that acts as the single source of truth for all users and groups.
+5.  **Office Integration (ONLYOFFICE & Collabora):** Integrated document editors that allow users to view and edit DOCX, XLSX, and PPTX files directly within NextExplorer.
+6.  **Authelia (The Security Gatekeeper):** Single Sign-On (SSO) with OIDC support. One secure "front door" for all your web apps, eliminating password fatigue for your 20+ users.
+7.  **LLDAP (The Identity Brain):** A modern, lightweight LDAP directory that acts as the single source of truth for all users and groups.
 
 ---
 
@@ -43,7 +44,7 @@ First, establish the dual-root structure and generate the cryptographic secrets 
 
 ```bash
 # 1. Create directory structures
-sudo mkdir -p /docker/{lldap/data,authelia/config,nextexplorer/{config,cache},tdarr/{server,configs},immich/{upload,postgres}}
+sudo mkdir -p /docker/{lldap/data,authelia/config,nextexplorer/{config,cache},tdarr/{server,configs},immich/{upload,postgres},onlyoffice/{logs,data,lib,db}}
 sudo mkdir -p /data
 
 # 2. Set ownership (Assuming PUID/PGID 1000)
@@ -74,6 +75,8 @@ sudo ufw allow 17170/tcp  # LLDAP Admin UI
 sudo ufw allow 3000/tcp   # NextExplorer
 sudo ufw allow 9091/tcp   # Authelia SSO
 sudo ufw allow 2283/tcp   # Immich Gallery
+sudo ufw allow 8080/tcp   # ONLYOFFICE
+sudo ufw allow 9980/tcp   # Collabora
 sudo ufw reload
 ```
 
@@ -176,4 +179,6 @@ For editors on M4 Macs, download the Tdarr Node binary and edit its local config
 | **Team Directory**    | HTTP     | `http://${LOCAL_IP}:17170`           |
 | **Web Asset Bridge**  | HTTPS    | `${PRIMARY_BASE_URL}:3000`           |
 | **Marketing Gallery** | HTTPS    | `${PRIMARY_BASE_URL}:2283`           |
+| **ONLYOFFICE Editor** | HTTPS    | `${PRIMARY_BASE_URL}:8080`           |
+| **Collabora Editor**  | HTTPS    | `${PRIMARY_BASE_URL}:9980`           |
 | **Identity Portal**   | HTTPS    | `${PRIMARY_BASE_URL}:9091`           |

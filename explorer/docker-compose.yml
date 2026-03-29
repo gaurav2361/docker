@@ -80,8 +80,16 @@ services:
       OIDC_SCOPES: "openid profile email groups"
       OIDC_AUTO_CREATE_USERS: "true"
       OIDC_ADMIN_GROUPS: "admins"
+      # ONLYOFFICE Integration
+      ONLYOFFICE_URL: "${PRIMARY_BASE_URL}:8080"
+      ONLYOFFICE_SECRET: "${ONLYOFFICE_SECRET}"
+      # Collabora Integration
+      COLLABORA_URL: "${PRIMARY_BASE_URL}:9980"
+      COLLABORA_SECRET: "${COLLABORA_SECRET}"
     depends_on:
       - authelia
+      - onlyoffice
+      - collabora
     networks:
       - media_net
 
@@ -176,6 +184,54 @@ services:
   immich-redis:
     image: docker.io/redis:6.2-alpine
     container_name: immich_redis
+    networks:
+      - media_net
+
+  # ██████╗ ███╗   ██╗██╗     ██╗   ██╗ ██████╗ ███████╗███████╗██╗ ██████╗███████╗
+  #██╔═══██╗████╗  ██║██║     ╚██╗ ██╔╝██╔═══██╗██╔════╝██╔════╝██║██╔════╝██╔════╝
+  #██║   ██║██╔██╗ ██║██║      ╚████╔╝ ██║   ██║█████╗  █████╗  ██║██║     █████╗
+  #██║   ██║██║╚██╗██║██║       ╚██╔╝  ██║   ██║██╔══╝  ██╔══╝  ██║██║     ██╔══╝
+  #╚██████╔╝██║ ╚████║███████╗   ██║   ╚██████╔╝██║     ██║     ██║╚██████╗███████╗
+  # ╚═════╝ ╚═╝  ╚═══╝╚══════╝   ╚═╝    ╚═════╝ ╚═╝     ╚═╝     ╚═╝ ╚═════╝╚══════╝
+  # (Office Integration - OnlyOffice Document Server)
+  onlyoffice:
+    image: onlyoffice/documentserver:latest
+    container_name: onlyoffice
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    environment:
+      - JWT_ENABLED=true
+      - JWT_SECRET=${ONLYOFFICE_SECRET}
+      - JWT_HEADER=Authorization
+    volumes:
+      - /docker/onlyoffice/logs:/var/log/onlyoffice
+      - /docker/onlyoffice/data:/var/www/onlyoffice/Data
+      - /docker/onlyoffice/lib:/var/lib/onlyoffice
+      - /docker/onlyoffice/db:/var/lib/postgresql
+    networks:
+      - media_net
+
+  #  ██████╗ ██████╗ ██╗     ██╗      █████╗ ██████╗  ██████╗ ██████╗  █████╗
+  # ██╔════╝██╔═══██╗██║     ██║     ██╔══██╗██╔══██╗██╔═══██╗██╔══██╗██╔══██╗
+  # ██║     ██║   ██║██║     ██║     ███████║██████╔╝██║   ██║██████╔╝███████║
+  # ██║     ██║   ██║██║     ██║     ██╔══██║██╔══██╗██║   ██║██╔══██╗██╔══██║
+  # ╚██████╗╚██████╔╝███████╗███████╗██║  ██║██████╔╝╚██████╔╝██║  ██║██║  ██║
+  #  ╚═════╝ ╚═════╝ ╚══════╝╚══════╝╚═╝  ╚═╝╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝
+  # (Office Integration - Collabora CODE)
+  collabora:
+    image: collabora/code:latest
+    container_name: collabora
+    restart: unless-stopped
+    cap_add: [MKNOD]
+    ports:
+      - "9980:9980"
+    environment:
+      - domain=${DOMAIN_REGEX}
+      - server_name=collabora.${DOMAIN}
+      - username=admin
+      - password=${COLLABORA_PASSWORD}
+      - extra_params=--o:ssl.enable=false --o:ssl.termination=true
     networks:
       - media_net
 
