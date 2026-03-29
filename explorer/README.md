@@ -17,14 +17,25 @@ This repository contains the configuration for **Serve**, a high-performance sel
 ## 📁 Directory Structure
 
 We use a root-level separation of concerns:
+
 - **/docker**: Stores all persistent application data, configuration files, and databases.
-- **/data**: Stores all actual media files (photos, videos) and the master shared folder.
+- **/data**: Stores all your media content (Photos, Movies, Videos, etc.) and Immich's internal library.
+
+```
+data
+├── Photos            # Your main photo collection
+├── Videos            # Your video collection
+├── Movies            # Optimized media
+├── immich_internal   # Immich's private app uploads (Mobile backup, etc.)
+└── ...               # Any other folders you create
+```
 
 ---
 
 ## 🔐 The Permissions Deep Dive (PUID/PGID)
 
 To avoid "Access Denied" errors, every app is forced to act as the same user (`UID 1000`).
+
 - **The Solution:** We use `PUID=1000` and `PGID=1000` in Docker.
 - **Samba:** We use "force user" masks to ensure any file you drop from your Mac matches the server owner instantly.
 
@@ -33,10 +44,11 @@ To avoid "Access Denied" errors, every app is forced to act as the same user (`U
 ## 🚀 Step-by-Step Implementation
 
 ### Step 1: Host Preparation
+
 ```bash
 # 1. Create root structures
 sudo mkdir -p /docker/{authelia/config,nextexplorer/{config,cache},tdarr/{server,configs},immich/{model-cache,postgres}}
-sudo mkdir -p /data/{shared_media,immich_internal}
+sudo mkdir -p /data/immich_internal
 
 # 2. Take ownership
 sudo chown -R gaurav:gaurav /docker /data
@@ -47,11 +59,13 @@ sudo find /data -type f -exec chmod 664 {} \;
 ```
 
 ### Step 2: Install & Configure Samba
+
 Install: `sudo apt update && sudo apt install samba -y`.
 Edit `/etc/samba/smb.conf` and add to the bottom:
+
 ```ini
-[Shared_Media]
-   path = /data/shared_media
+[Data]
+   path = /data
    valid users = gaurav
    read only = no
    browsable = yes
@@ -60,10 +74,12 @@ Edit `/etc/samba/smb.conf` and add to the bottom:
    create mask = 0775
    directory mask = 0775
 ```
+
 `sudo systemctl restart smbd`.
 
 ### Step 3: Create the `.env` File (Dual Access Support)
-Create a `.env` file and populate it with your credentials. You can define both your **Local IP** and your **Domain** name.
+
+Create a `.env` file and populate it with your credentials:
 
 ```ini
 TZ=Asia/Kolkata
@@ -75,8 +91,6 @@ LOCAL_IP=192.168.1.XX
 DOMAIN=media.yourdomain.com
 
 # Active Identity (Which one the apps use for OIDC/Links)
-# Set to http://${LOCAL_IP} for home-only access
-# Set to https://${DOMAIN} for external/domain access (requires reverse proxy)
 PRIMARY_BASE_URL=http://${LOCAL_IP}
 
 # NextExplorer SSO
@@ -93,49 +107,42 @@ POSTGRES_DB=immich
 ```
 
 ### Step 4: Deploy the Stack
+
 ```bash
 docker compose up -d
 ```
 
 ---
 
-## 🌐 Hybrid Access (IP & Domain)
+## 📸 Connecting Immich to Your Files
 
-You can use both your **Local IP** and **Domain** simultaneously:
+Immich is configured to see your entire `/data` directory as a Read-Only External Library.
 
-1.  **Samba (Internal Only):** Always use your `LOCAL_IP` for mounting the drive on Mac/Windows. It provides the fastest speeds and doesn't rely on your internet connection.
-2.  **Web Apps (Internal/External):** 
-    - Use `PRIMARY_BASE_URL=http://${LOCAL_IP}` while setting things up.
-    - Switch to `PRIMARY_BASE_URL=https://${DOMAIN}` when you want to share links with guests or use SSO externally.
-    - **Note:** If you use a Domain, you must have a Reverse Proxy (Nginx Proxy Manager, Cloudflare Tunnels, etc.) pointing to the server's local ports.
+1.  Log into Immich -> **Administration** -> **External Libraries**.
+2.  Click **Add Library**.
+3.  Add the path: `/mnt/Data`
+4.  **Pro Tip:** If you want to avoid scanning the `immich_internal` folder, you can add specific sub-paths like `/mnt/Data/Photos` instead of the root.
 
 ---
 
 ## 👥 User Management Examples
 
 ### 1. Creating a Samba User
+
 `sudo smbpasswd -a <username>`
 
 ### 2. Creating an Authelia User (SSO)
-First, generate a secure Argon2 hash for your password:
+
+First, generate a secure Argon2 hash:
 `docker run --rm authelia/authelia:latest authelia crypto hash generate argon2 --password 'YourNewPassword'`
 
-Then, edit `/docker/authelia/config/users.yml` and paste the output:
-```yaml
-users:
-  gaurav:
-    displayname: "Gaurav"
-    password: "$argon2id$v=19$m=65536,t=3,p=4$..." 
-    email: gaurav@domain.com
-    groups: [admins]
-```
+Then, edit `/docker/authelia/config/users.yml` and paste the output.
 
 ---
 
 ## ⚙️ Tdarr Hardware Acceleration (Mac M4 Node)
-To use an Apple Silicon Mac to transcode videos over the network at blazing speeds, download the macOS Tdarr Node and edit the `Tdarr_Node_Config.json` file. 
 
-You must include **Path Translation** so your Mac knows how to map the Ubuntu server path to the local Samba mount:
+To use an Apple Silicon Mac to transcode videos over the network, map the paths in `Tdarr_Node_Config.json`:
 
 ```json
 {
@@ -144,8 +151,8 @@ You must include **Path Translation** so your Mac knows how to map the Ubuntu se
   "serverPort": "8266",
   "pathTranslators": [
     {
-      "server": "/data/shared_media",
-      "node": "/Volumes/Shared_Media"
+      "server": "/data",
+      "node": "/Volumes/Data"
     }
   ]
 }
@@ -155,9 +162,9 @@ You must include **Path Translation** so your Mac knows how to map the Ubuntu se
 
 ## 🔗 Connection Links Summary
 
-| Access Method | Link / Path |
-| :--- | :--- |
-| **Samba (Mac)** | `smb://${LOCAL_IP}/Shared_Media` |
+| Access Method    | Link / Path                |
+| :--------------- | :------------------------- |
+| **Samba (Mac)**  | `smb://${LOCAL_IP}/Data`   |
 | **NextExplorer** | `${PRIMARY_BASE_URL}:3000` |
-| **Immich** | `${PRIMARY_BASE_URL}:2283` |
-| **Authelia** | `${PRIMARY_BASE_URL}:9091` |
+| **Immich**       | `${PRIMARY_BASE_URL}:2283` |
+| **Authelia**     | `${PRIMARY_BASE_URL}:9091` |

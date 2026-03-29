@@ -25,17 +25,16 @@ services:
     volumes:
       - /docker/nextexplorer/config:/config
       - /docker/nextexplorer/cache:/cache
-      - /data/shared_media:/mnt/Shared_Media
+      # Mount the entire /data root for web management
+      - /data:/mnt/Data
     environment:
       NODE_ENV: production
       PORT: "3000"
-      # Uses the Primary Base URL (IP or Domain) for public identity
       PUBLIC_URL: "${PRIMARY_BASE_URL}:3000"
       PUID: ${PUID}
       PGID: ${PGID}
       AUTH_MODE: "oidc"
       OIDC_ENABLED: "true"
-      # OIDC Issuer MUST match the URL used to reach Authelia
       OIDC_ISSUER: "${PRIMARY_BASE_URL}:9091"
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID}
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET}
@@ -64,7 +63,7 @@ services:
     volumes:
       - /docker/tdarr/server:/app/server
       - /docker/tdarr/configs:/app/configs
-      - /data/shared_media:/media/shared_media
+      - /data:/media/data
 
   tdarr-node:
     image: ghcr.io/haveagitgat/tdarr_node:latest
@@ -79,7 +78,7 @@ services:
       - serverPort=8266
     volumes:
       - /docker/tdarr/configs:/app/configs
-      - /data/shared_media:/media/shared_media
+      - /data:/media/data
     devices:
       - /dev/dri:/dev/dri
 
@@ -101,7 +100,8 @@ services:
       - TZ=${TZ}
     volumes:
       - /data/immich_internal:/usr/src/app/upload
-      - /data/shared_media:/mnt/Shared_Media:ro
+      # THE BRIDGE: Entire /data root mounted as Read-Only for External Libraries
+      - /data:/mnt/Data:ro
     depends_on:
       - immich-redis
       - immich-db
