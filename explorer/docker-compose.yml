@@ -29,15 +29,11 @@ services:
     environment:
       NODE_ENV: production
       PORT: "3000"
-      # If using a domain, this should be https://explorer.yourdomain.com
       PUBLIC_URL: "http://${SERVER_IP_OR_DOMAIN}:3000"
       PUID: ${PUID}
       PGID: ${PGID}
-
-      # Authelia SSO Configuration
       AUTH_MODE: "oidc"
       OIDC_ENABLED: "true"
-      # OIDC Issuer MUST match the URL you use to access Authelia
       OIDC_ISSUER: "http://${SERVER_IP_OR_DOMAIN}:9091"
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID}
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET}
@@ -47,7 +43,7 @@ services:
       - authelia
 
   # -------------------------------------------
-  # TDARR SERVER & NODE (H.265 Automation)
+  # TDARR (Video Optimization)
   # -------------------------------------------
   tdarr:
     image: ghcr.io/haveagitgat/tdarr:latest
@@ -86,7 +82,7 @@ services:
       - /dev/dri:/dev/dri
 
   # -------------------------------------------
-  # IMMICH (The AI Gallery)
+  # IMMICH (AI Gallery)
   # -------------------------------------------
   immich-server:
     image: ghcr.io/immich-app/immich-server:release
@@ -118,7 +114,7 @@ services:
       - /docker/immich/model-cache:/cache
 
   immich-db:
-    image: docker.io/tensorchord/pgvecto-rs:pg14-v0.2.0@sha256:90724186f0a3517cf6914295b5ab410db9ce23190a2d9d0b9dd6463e3fa298f0
+    image: docker.io/tensorchord/pgvecto-rs:pg14-v0.2.0
     container_name: immich_postgres
     restart: always
     environment:
@@ -129,6 +125,6 @@ services:
       - /docker/immich/postgres:/var/lib/postgresql/data
 
   immich-redis:
-    image: docker.io/redis:6.2-alpine@sha256:e3b17ba9479deec4b7d1eeec1548a253acc5374d68d3b27937fc446edc06d19
+    image: docker.io/redis:6.2-alpine
     container_name: immich_redis
     restart: always
