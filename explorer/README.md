@@ -17,7 +17,6 @@ This repository contains the configuration for **Serve**, a high-performance sel
 ## 📁 Directory Structure
 
 We use a root-level separation of concerns:
-
 - **/docker**: Stores all persistent application data, configuration files, and databases.
 - **/data**: Stores all your media content (Photos, Movies, Videos, etc.) and Immich's internal library.
 
@@ -35,7 +34,6 @@ data
 ## 🔐 The Permissions Deep Dive (PUID/PGID)
 
 To avoid "Access Denied" errors, every app is forced to act as the same user (`UID 1000`).
-
 - **The Solution:** We use `PUID=1000` and `PGID=1000` in Docker.
 - **Samba:** We use "force user" masks to ensure any file you drop from your Mac matches the server owner instantly.
 
@@ -44,7 +42,6 @@ To avoid "Access Denied" errors, every app is forced to act as the same user (`U
 ## 🚀 Step-by-Step Implementation
 
 ### Step 1: Host Preparation
-
 ```bash
 # 1. Create root structures
 sudo mkdir -p /docker/{authelia/config,nextexplorer/{config,cache},tdarr/{server,configs},immich/{model-cache,postgres}}
@@ -59,10 +56,8 @@ sudo find /data -type f -exec chmod 664 {} \;
 ```
 
 ### Step 2: Install & Configure Samba
-
 Install: `sudo apt update && sudo apt install samba -y`.
 Edit `/etc/samba/smb.conf` and add to the bottom:
-
 ```ini
 [Data]
    path = /data
@@ -74,11 +69,9 @@ Edit `/etc/samba/smb.conf` and add to the bottom:
    create mask = 0775
    directory mask = 0775
 ```
-
 `sudo systemctl restart smbd`.
 
 ### Step 3: Create the `.env` File (Dual Access Support)
-
 Create a `.env` file and populate it with your credentials:
 
 ```ini
@@ -107,41 +100,57 @@ POSTGRES_DB=immich
 ```
 
 ### Step 4: Deploy the Stack
-
 ```bash
 docker compose up -d
 ```
 
 ---
 
-## 📸 Connecting Immich to Your Files
+## 👤 First-Time User Setup (The 'gaurav' Account)
 
-Immich is configured to see your entire `/data` directory as a Read-Only External Library.
+To make the stack functional, you must add your user to both the Linux system (for Samba) and Authelia (for Web SSO).
 
-1.  Log into Immich -> **Administration** -> **External Libraries**.
-2.  Click **Add Library**.
-3.  Add the path: `/mnt/Data`
-4.  **Pro Tip:** If you want to avoid scanning the `immich_internal` folder, you can add specific sub-paths like `/mnt/Data/Photos` instead of the root.
+### 1. Add User to Samba
+Run this command on your Ubuntu server to set a network password for the `gaurav` account:
+```bash
+sudo smbpasswd -a gaurav
+```
+*Note: This password can be different from your Ubuntu login password.*
+
+### 2. Add User to Authelia (SSO)
+First, generate a secure Argon2 hash for your Authelia password:
+```bash
+docker run --rm authelia/authelia:latest authelia crypto hash generate argon2 --password 'YourNewPassword'
+```
+
+Then, create/edit the file `/docker/authelia/config/users.yml` and paste the output:
+```yaml
+users:
+  gaurav:
+    displayname: "Gaurav"
+    password: "$argon2id$v=19$m=65536,t=3,p=4$..." # Paste your generated hash here
+    email: gaurav@domain.com
+    groups:
+      - admins
+      - users
+```
 
 ---
 
-## 👥 User Management Examples
+## 📸 Connecting Immich to Your Files
 
-### 1. Creating a Samba User
+Immich is configured as a **Read-Only Gallery**. 
+- It can see your photos in `/data` via the External Library bridge (`/mnt/Data`).
+- It **cannot** upload or delete files via the Web UI (Upload is disabled by `:ro` mount).
 
-`sudo smbpasswd -a <username>`
-
-### 2. Creating an Authelia User (SSO)
-
-First, generate a secure Argon2 hash:
-`docker run --rm authelia/authelia:latest authelia crypto hash generate argon2 --password 'YourNewPassword'`
-
-Then, edit `/docker/authelia/config/users.yml` and paste the output.
+**How to sync:**
+1. Log into Immich -> **Administration** -> **External Libraries**.
+2. Click **Add Library**.
+3. Add the path: `/mnt/Data`
 
 ---
 
 ## ⚙️ Tdarr Hardware Acceleration (Mac M4 Node)
-
 To use an Apple Silicon Mac to transcode videos over the network, map the paths in `Tdarr_Node_Config.json`:
 
 ```json
@@ -162,9 +171,9 @@ To use an Apple Silicon Mac to transcode videos over the network, map the paths 
 
 ## 🔗 Connection Links Summary
 
-| Access Method    | Link / Path                |
-| :--------------- | :------------------------- |
-| **Samba (Mac)**  | `smb://${LOCAL_IP}/Data`   |
+| Access Method | Link / Path |
+| :--- | :--- |
+| **Samba (Mac)** | `smb://${LOCAL_IP}/Data` |
 | **NextExplorer** | `${PRIMARY_BASE_URL}:3000` |
-| **Immich**       | `${PRIMARY_BASE_URL}:2283` |
-| **Authelia**     | `${PRIMARY_BASE_URL}:9091` |
+| **Immich** | `${PRIMARY_BASE_URL}:2283` |
+| **Authelia** | `${PRIMARY_BASE_URL}:9091` |

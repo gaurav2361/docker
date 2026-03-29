@@ -1,0 +1,13 @@
+# Authelia Users Configuration (Example)
+# Location on server: /docker/authelia/config/users.yml
+
+users:
+  gaurav:
+    displayname: "Gaurav"
+    # Generate this hash using: 
+    # docker run --rm authelia/authelia:latest authelia crypto hash generate argon2 --password 'YourPassword'
+    password: "$argon2id$v=19$m=65536,t=3,p=4$..." 
+    email: gaurav@domain.com
+    groups:
+      - admins
+      - users
