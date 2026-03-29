@@ -1,167 +1,130 @@
-# Serve: The Ultimate Storage & Media Stack
+# Serve: Enterprise Marketing Storage & Identity Stack
 
-This repository contains the configuration for **Serve**, a high-performance self-hosted storage and media ecosystem. It is designed for a central Ubuntu server, maintaining a strict split between `/docker` (configs) and `/data` (storage).
+This repository contains the configuration for **Serve**, a high-performance ecosystem tailored for marketing teams (15-20+ users). It features **Unified Identity Management**—one single username/password for both the network drive (Samba) and all web applications.
 
 ---
 
-## 🏗 Why These Tools? (Architecture & Strategy)
+## 🏗 Why This Architecture? (Enterprise Strategy)
 
-1.  **Samba (The Heavy Lifter):** Native local file-sharing. Moves massive folders (100GB+) at maximum network speed directly from your Mac/Windows as a mounted drive.
-2.  **NextExplorer (The Web Bridge):** Secure web interface for guest access. Share folders via URL without exposing your internal network or requiring complex VPNs.
-3.  **Tdarr (The Optimizer):** Automated background robot that converts videos to H.265 (HEVC), saving terabytes of storage space with zero manual effort.
-4.  **Immich (The Gallery Experience):** High-performance Google Photos alternative with facial recognition, mobile backup, and a beautiful timeline.
-5.  **Authelia (The Security Gatekeeper):** Single Sign-On (SSO) with OIDC support. One secure "front door" for all your web apps.
+### 1. Unified Identity (LLDAP + Authelia)
+- **The Problem:** Managing 20 users separately in Samba and Authelia is a nightmare.
+- **The Solution:** We use **LLDAP** as the single source of truth. When you add a user to LLDAP, they instantly gain access to the Samba drive and the Web SSO.
+- **Authelia** connects to LLDAP to provide secure Single Sign-On (SSO) for NextExplorer and Immich.
+
+### 2. High-Performance Storage (Samba)
+- Marketing assets (4K video, high-res RAW photos) require extreme speeds. Samba provides native network drive performance, allowing your team to edit directly off the server.
+
+### 3. Automated Asset Optimization (Tdarr)
+- Automatically converts massive marketing videos to optimized H.265 (HEVC) in the background, saving terabytes of space while maintaining visual quality.
+
+- A Read-Only gallery for clients and team members to browse assets, featuring facial recognition and object detection for quick searching.
 
 ---
 
 ## 📁 Directory Structure
 
-We use a root-level separation of concerns:
-- **/docker**: Stores all persistent application data, configuration files, and databases.
-- **/data**: Stores all your media content (Photos, Movies, Videos, etc.) and Immich's internal library.
-
-```
-data
-├── Photos            # Your main photo collection
-├── Videos            # Your video collection
-├── Movies            # Optimized media
-├── immich_internal   # Immich's private app uploads (Mobile backup, etc.)
-└── ...               # Any other folders you create
-```
+- **/docker**: All configuration, databases, and application data.
+- **/data**: All marketing assets (Raw, Projects, Final).
 
 ---
 
-## 🔐 The Permissions Deep Dive (PUID/PGID)
+## 🚀 Implementation Phase 1: Host & Identity
 
-To avoid "Access Denied" errors, every app is forced to act as the same user (`UID 1000`).
-- **The Solution:** We use `PUID=1000` and `PGID=1000` in Docker.
-- **Samba:** We use "force user" masks to ensure any file you drop from your Mac matches the server owner instantly.
-
----
-
-## 🚀 Step-by-Step Implementation
-
-### Step 1: Host Preparation
+### 1. Host Preparation
 ```bash
-# 1. Create root structures
-sudo mkdir -p /docker/{authelia/config,nextexplorer/{config,cache},tdarr/{server,configs},immich/{model-cache,postgres}}
-sudo mkdir -p /data/immich_internal
-
-# 2. Take ownership
+sudo mkdir -p /docker/{lldap/data,authelia/config,nextexplorer/{config,cache},tdarr/{server,configs},immich/{upload,postgres}}
+sudo mkdir -p /data
 sudo chown -R gaurav:gaurav /docker /data
-
-# 3. Set standard permissions
-sudo find /data -type d -exec chmod 775 {} \;
-sudo find /data -type f -exec chmod 664 {} \;
 ```
 
-### Step 2: Install & Configure Samba
-Install: `sudo apt update && sudo apt install samba -y`.
-Edit `/etc/samba/smb.conf` and add to the bottom:
+### 2. Configure Firewall (UFW)
+For a multi-user environment, ensuring the firewall is open but secure is critical:
+```bash
+sudo ufw allow 445/tcp    # Samba (Internal Drive)
+sudo ufw allow 17170/tcp  # LLDAP UI (Admin only)
+sudo ufw allow 3000/tcp   # NextExplorer
+sudo ufw allow 9091/tcp   # Authelia SSO
+sudo ufw allow 2283/tcp   # Immich Gallery
+sudo ufw reload
+```
+
+### 3. Identity Setup (LLDAP)
+1. Copy `.env.example` to `.env` and fill in your passwords.
+2. Run `docker compose up -d lldap`.
+3. Access `http://<IP>:17170`. 
+4. Login with `admin` and your `LDAP_ADMIN_PASSWORD`.
+5. **Create your Users:** Add your 15-20 team members here.
+6. **Create a Group:** Create a group named `admins` and add yourself to it.
+
+---
+
+## 🚀 Implementation Phase 2: Unified Samba
+
+To make Samba use your LLDAP users, we connect the host OS to the LDAP container.
+
+### 1. Install LDAP Client on Ubuntu
+```bash
+sudo apt update && sudo apt install libnss-ldap libpam-ldap ldap-utils -y
+```
+
+### 2. Connect Samba to LLDAP
+Edit `/etc/samba/smb.conf`. Instead of local users, we point to the LLDAP container:
 ```ini
-[Data]
+[global]
+   workgroup = WORKGROUP
+   security = user
+   passdb backend = ldapsam:ldap://localhost:3890
+   ldap suffix = dc=marketing,dc=com
+   ldap admin dn = cn=admin,dc=marketing,dc=com
+   ldap ssl = off
+
+[Marketing_Assets]
    path = /data
-   valid users = gaurav
+   valid users = @users
    read only = no
-   browsable = yes
    force user = gaurav
    force group = gaurav
    create mask = 0775
    directory mask = 0775
 ```
-`sudo systemctl restart smbd`.
-
-### Step 3: Create the `.env` File (Dual Access Support)
-Create a `.env` file and populate it with your credentials:
-
-```ini
-TZ=Asia/Kolkata
-PUID=1000
-PGID=1000
-
-# Network Configuration
-LOCAL_IP=192.168.1.XX
-DOMAIN=media.yourdomain.com
-
-# Active Identity (Which one the apps use for OIDC/Links)
-PRIMARY_BASE_URL=http://${LOCAL_IP}
-
-# NextExplorer SSO
-OIDC_CLIENT_ID=nextexplorer
-OIDC_CLIENT_SECRET=your_secure_secret
-
-# Immich Database
-IMMICH_DB_USERNAME=immich
-IMMICH_DB_PASSWORD=immich_secure_password
-IMMICH_DB_NAME=immich
-POSTGRES_USER=immich
-POSTGRES_PASSWORD=immich_secure_password
-POSTGRES_DB=immich
-```
-
-### Step 4: Deploy the Stack
-```bash
-docker compose up -d
-```
 
 ---
 
-## 👤 First-Time User Setup (The 'gaurav' Account)
+## 🚀 Implementation Phase 3: Web Apps
 
-To make the stack functional, you must add your user to both the Linux system (for Samba) and Authelia (for Web SSO).
-
-### 1. Add User to Samba
-Run this command on your Ubuntu server to set a network password for the `gaurav` account:
-```bash
-sudo smbpasswd -a gaurav
-```
-*Note: This password can be different from your Ubuntu login password.*
-
-### 2. Add User to Authelia (SSO)
-First, generate a secure Argon2 hash for your Authelia password:
-```bash
-docker run --rm authelia/authelia:latest authelia crypto hash generate argon2 --password 'YourNewPassword'
-```
-
-Then, create/edit the file `/docker/authelia/config/users.yml` and paste the output:
+### 1. Authelia OIDC Setup
+Ensure your Authelia `configuration.yml` points to LLDAP as the authentication backend:
 ```yaml
-users:
-  gaurav:
-    displayname: "Gaurav"
-    password: "$argon2id$v=19$m=65536,t=3,p=4$..." # Paste your generated hash here
-    email: gaurav@domain.com
-    groups:
-      - admins
-      - users
+authentication_backend:
+  ldap:
+    implementation: custom
+    url: ldap://lldap:3890
+    timeout: 5s
+    base_dn: dc=marketing,dc=com
+    users_filter: "(&(|(uid={input})(mail={input}))(objectClass=person))"
+    groups_filter: "(member={dn})"
 ```
 
----
-
-## 📸 Connecting Immich to Your Files
-
-Immich is configured as a **Read-Only Gallery**. 
-- It can see your photos in `/data` via the External Library bridge (`/mnt/Data`).
-- It **cannot** upload or delete files via the Web UI (Upload is disabled by `:ro` mount).
-
-**How to sync:**
-1. Log into Immich -> **Administration** -> **External Libraries**.
-2. Click **Add Library**.
-3. Add the path: `/mnt/Data`
+### 2. Immich SSO (Manual Step)
+1. Log into Immich as admin -> **Settings -> OAuth**.
+2. **Issuer URL:** `http://<SERVER_IP>:9091`
+3. **Client ID:** `immich`
+4. **Client Secret:** (Generate one in Authelia config)
+5. **Auto Register:** Enabled (This creates their gallery profile on first login).
 
 ---
 
-## ⚙️ Tdarr Hardware Acceleration (Mac M4 Node)
-To use an Apple Silicon Mac to transcode videos over the network, map the paths in `Tdarr_Node_Config.json`:
-
+## ⚙️ Tdarr Marketing Node (Mac M4)
+For marketing editors on Mac M4, use **Path Translation** in `Tdarr_Node_Config.json`:
 ```json
 {
-  "nodeName": "M4-MacBook",
-  "serverIP": "192.168.1.XX",
+  "nodeName": "Editor-M4",
+  "serverIP": "<SERVER_IP>",
   "serverPort": "8266",
   "pathTranslators": [
     {
       "server": "/data",
-      "node": "/Volumes/Data"
+      "node": "/Volumes/Marketing_Assets"
     }
   ]
 }
@@ -169,11 +132,10 @@ To use an Apple Silicon Mac to transcode videos over the network, map the paths 
 
 ---
 
-## 🔗 Connection Links Summary
-
-| Access Method | Link / Path |
+## 🔗 Connection Summary
+| Access Method | Path / URL |
 | :--- | :--- |
-| **Samba (Mac)** | `smb://${LOCAL_IP}/Data` |
-| **NextExplorer** | `${PRIMARY_BASE_URL}:3000` |
-| **Immich** | `${PRIMARY_BASE_URL}:2283` |
-| **Authelia** | `${PRIMARY_BASE_URL}:9091` |
+| **Samba (Internal)** | `smb://${LOCAL_IP}/Marketing_Assets` |
+| **Identity Admin** | `http://${LOCAL_IP}:17170` |
+| **Asset Bridge** | `${PRIMARY_BASE_URL}:3000` |
+| **Media Gallery** | `${PRIMARY_BASE_URL}:2283` |
