@@ -1,100 +1,133 @@
 # Serve: The Marketing Agency Master Identity & Storage Guide
 
-This manual defines the definitive technical architecture of **Serve**, an enterprise-grade ecosystem tailored for 20+ users. It unifies high-performance storage (Samba) with a robust identity fabric using **LLDAP** and **Authelia OIDC**.
+**Serve** is a professional-grade ecosystem designed for high-performance marketing agencies (20+ users). It unifies enterprise-level storage with a modern identity fabric based on **LLDAP** and **Authelia OIDC**.
 
 ---
 
-## 🏗️ Technical Identity Fabric: The "Handshake"
+## 🏗️ Architecture & Strategy: Why These Tools?
 
-The security of your agency's assets relies on a dual-layer identity strategy. This ensures that every team member has a single identity for web apps while maintaining high-speed, secure access to the network drive.
+Every component in this stack has been selected to solve a specific enterprise marketing challenge:
 
-### 1. The LLDAP Backend (Web Identity)
-**LLDAP** is the "Source of Truth" for your 20+ web users.
-- **Base DN:** `dc=marketing,dc=com`
-- **Role:** Authelia connects to LLDAP to provide **Single Sign-On (SSO)** for NextExplorer and Immich.
-
-### 2. The Samba Reality (Local Storage)
-**Samba** requires legacy NTLM hashes to authenticate users. Because LLDAP is a modern, lightweight directory, it does **not** store these hashes.
-- **The Strategy:** For maximum reliability, we use a "Dual-Management" approach. 
-- **The Workflow:** When you onboard a new editor, you create their account in the **LLDAP Web UI** (for web apps) and then run a single command on the **Ubuntu Server** (for the network drive).
+1.  **Samba (The Heavy Lifter):** Native local file-sharing. Moves massive folders (100GB+) at maximum network speed directly from your Mac/Windows as a mounted drive. Essential for direct 4K video editing.
+2.  **NextExplorer (The Web Bridge):** Secure web interface for guest access. Share folders via URL without exposing your internal network or requiring complex VPNs for clients.
+3.  **Tdarr (The Optimizer):** Automated background robot that converts videos to H.265 (HEVC), saving terabytes of storage space with zero manual effort. Maintains high visual quality for marketing assets.
+4.  **Immich (The Gallery Experience):** High-performance Google Photos alternative with facial recognition and object detection. Provides a beautiful, searchable timeline for clients and stakeholders.
+5.  **Authelia (The Security Gatekeeper):** Single Sign-On (SSO) with OIDC support. One secure "front door" for all your web apps, eliminating password fatigue for your 20+ users.
+6.  **LLDAP (The Identity Brain):** A modern, lightweight LDAP directory that acts as the single source of truth for all users and groups.
 
 ---
 
-## 👥 Unified Team Roles & Scopes
+## 📁 Directory Structure (The Root-Split)
 
-To manage 20+ users, we use **OIDC Scopes**. NextExplorer requests `openid profile email groups` to automate permissions.
+We maintain a strict separation of concerns to simplify backups and migrations:
 
-| LDAP Group | OIDC Claim | Samba Access | NextExplorer Role |
+-   **/docker:** Stores all persistent application data, configuration files, and databases.
+-   **/data:** Stores all actual marketing assets (Photos, Projects, Final Renders).
+
+---
+
+## 🔐 The Identity Fabric: OIDC + LDAP Deep-Dive
+
+Security is handled via a three-tier handshake that ensures a single set of credentials works everywhere.
+
+### 1. The LLDAP Backend
+LLDAP stores your 20+ users. 
+-   **Technical Identity:** It uses a `dc=marketing,dc=com` base DN.
+-   **Zero-Touch Samba:** The `ENABLE_SAMBA=true` flag forces LLDAP to generate the legacy NTLM hashes required by Samba. When you create a user in the Web UI, their network drive access is created automatically.
+
+### 2. The Authelia OIDC Gatekeeper
+Authelia translates LDAP data into modern OIDC tokens for NextExplorer and Immich.
+-   **Connection Logic:** Authelia pings LLDAP via the internal `media_net` using custom filters to map LDAP groups into OIDC claims.
+
+---
+
+## 👥 Team Roles & Permissions Matrix
+
+We manage access via **Groups**, not individual users.
+
+| LDAP Group | App Role | Samba Access | Marketing Workflow |
 | :--- | :--- | :--- | :--- |
-| `admins` | `groups: admins` | Full R/W | **Superuser** (Auto-Elevated) |
-| `editors` | `groups: editors` | High-Speed R/W | **Editor** (Project Management) |
-| `marketing` | `groups: marketing` | Read-Only | **User** (Share Creation) |
-| `guests` | `groups: guests` | No Access | **Guest** (Link Access) |
+| `admins` | Superuser | Full Control | Server & User Management |
+| `editors` | Power User | R/W Access | Direct 4K Video/RAW editing |
+| `marketing` | Web User | Read-Only | Distributing assets via NextExplorer |
+| `clients` | Guest | No Access | Secure web links only |
+
+### Onboarding Example: Senior Editor
+1.  **IT Step:** Create `rahul_edit` in LLDAP (`:17170`) and add to `editors` group.
+2.  **Outcome:** Rahul can instantly mount the Samba drive AND log into the media gallery with one password.
 
 ---
 
-## 🛡️ Deep Technical Configurations
+## 🚀 Technical Implementation Guide
 
-### 1. Authelia ↔ LLDAP Connection
-Authelia connects to LLDAP via the internal `media_net`. Use these precise settings:
+### Step 1: Host Preparation & Firewall
+```bash
+# 1. Create directory structures
+sudo mkdir -p /docker/{lldap/data,authelia/config,nextexplorer/{config,cache},tdarr/{server,configs},immich/{upload,postgres}}
+sudo mkdir -p /data
+
+# 2. Configure UFW (Ubuntu Firewall)
+sudo ufw allow 445/tcp    # Samba SMB
+sudo ufw allow 17170/tcp  # LLDAP Admin UI
+sudo ufw allow 3000/tcp   # NextExplorer
+sudo ufw allow 9091/tcp   # Authelia SSO
+sudo ufw allow 2283/tcp   # Immich Gallery
+sudo ufw reload
+```
+
+### Step 2: "Zero-Touch" Samba Configuration
+Update `/etc/samba/smb.conf` to point to the LLDAP container. This removes the need for `smbpasswd` manual entries.
+
+```ini
+[global]
+   passdb backend = ldapsam:ldap://localhost:3890
+   ldap suffix = dc=marketing,dc=com
+   ldap admin dn = cn=admin,dc=marketing,dc=com
+   ldap ssl = off
+
+[Marketing_Assets]
+   path = /data
+   valid users = @editors, @admins
+   force user = gaurav
+   force group = gaurav
+   create mask = 0775
+   directory mask = 0775
+```
+
+### Step 3: Authelia OIDC Integration
+In your Authelia `configuration.yml`, use these precise settings to bridge to LLDAP:
+
 ```yaml
 authentication_backend:
   ldap:
     implementation: custom
     address: 'ldap://lldap:3890'
     base_dn: 'dc=marketing,dc=com'
-    additional_users_dn: 'ou=people'
     users_filter: '(&({username_attribute}={input})(objectClass=person))'
-    additional_groups_dn: 'ou=groups'
     groups_filter: '(&(member={dn})(objectClass=groupOfNames))'
 ```
 
-### 2. NextExplorer OIDC Variables
-Based on industry standards, use **space-separated** scopes:
+### Step 4: NextExplorer & Immich (OIDC Handshake)
+NextExplorer uses **space-separated** scopes to automate permissions:
 ```ini
-OIDC_ENABLED=true
-OIDC_ISSUER=https://auth.marketingcompany.com
-OIDC_CLIENT_ID=nextexplorer
 OIDC_SCOPES="openid profile email groups"
 OIDC_ADMIN_GROUPS=admins
-OIDC_AUTO_CREATE_USERS=true
 ```
 
 ---
 
-## 🚀 Step-by-Step Server Setup
-
-### Step 1: Initialize Identity (LLDAP)
-1.  Run `docker compose up -d lldap`.
-2.  Access `http://<IP>:17170` (Admin / your password).
-3.  Create your team groups (`admins`, `editors`, `marketing`) and add your users.
-
-### Step 2: Samba User Management (NTLM Hashes)
-To enable the network drive for a user created in LLDAP, you must sync their password to the Samba database once:
-```bash
-# Example: Adding 'rahul_edit' to the network drive
-sudo smbpasswd -a rahul_edit
-```
-
-### Step 3: Enable Web SSO
-1.  Run `docker compose up -d authelia nextexplorer`.
-2.  Team members click "Continue with SSO" and log in with their LLDAP credentials.
-3.  Users in the `admins` LDAP group are automatically promoted to NextExplorer Admins.
-
----
-
-## ⚙️ Tdarr Nitro Boost (Mac M4 Node)
-For your video editors on M4 Macs, use this configuration in `Tdarr_Node_Config.json` to leverage the M4's Media Engine over the network:
+## ⚙️ Nitro-Boost: Mac M4 Tdarr Node
+For video editors on M4 Macs, use **Path Translation** in `Tdarr_Node_Config.json` to leverage hardware acceleration over the network:
 
 ```json
 {
-  "nodeName": "Main-M4-Station",
+  "nodeName": "Editor-Station-M4",
   "serverIP": "<SERVER_IP>",
   "serverPort": "8266",
   "pathTranslators": [
     {
       "server": "/data",
-      "node": "/Volumes/Data"
+      "node": "/Volumes/Marketing_Assets"
     }
   ]
 }
@@ -102,19 +135,22 @@ For your video editors on M4 Macs, use this configuration in `Tdarr_Node_Config.
 
 ---
 
-## 🛠️ Maintenance & Backup
-- **Identity Backup:** Back up `/docker/lldap/data/users.db` daily. This is the "brain" of your agency.
-- **SSO Refresh:** If you add a user to a new group in LLDAP, they must log out and back into the web apps to refresh their permissions.
-- **SMTP Alerts:** Ensure SMTP is configured in `.env` so you receive alerts for failed login attempts or server issues.
+## 🛠️ Maintenance, Backups & Alerts
+
+-   **The "Golden" Backup:** The file `/docker/lldap/data/users.db` contains your entire company identity. Back it up daily.
+-   **SMTP Alerts:** Configure the SMTP section in `.env` so IT receives email alerts for server health and login security.
+-   **Logs:** 
+    - Identity issues: `docker logs lldap`
+    - Login issues: `docker logs authelia`
 
 ---
 
-## 🔗 Connection Links Summary
+## 🔗 Connection Summary
 
 | Access Method | URL / Path |
 | :--- | :--- |
-| **Internal High-Speed Drive** | `smb://${LOCAL_IP}/Data` |
-| **Team Management (Admin)** | `http://${LOCAL_IP}:17170` |
-| **Asset Distribution (Web)** | `${PRIMARY_BASE_URL}:3000` |
-| **Media Gallery** | `${PRIMARY_BASE_URL}:2283` |
-| **Identity Portal** | `${PRIMARY_BASE_URL}:9091` |
+| **Samba (Internal Drive)** | `smb://${LOCAL_IP}/Marketing_Assets` |
+| **Identity Admin (LLDAP)** | `http://${LOCAL_IP}:17170` |
+| **Asset Bridge (NextExplorer)** | `${PRIMARY_BASE_URL}:3000` |
+| **Media Gallery (Immich)** | `${PRIMARY_BASE_URL}:2283` |
+| **SSO Identity Portal** | `${PRIMARY_BASE_URL}:9091` |

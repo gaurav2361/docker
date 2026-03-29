@@ -17,6 +17,8 @@ services:
       - LLDAP_LDAP_USER_PASS=${LDAP_ADMIN_PASSWORD}
       - LLDAP_DATABASE_URL=sqlite:///data/users.db
       - LLDAP_KEY_SEED=${LLDAP_SEED}
+      # THE MAGIC SWITCH: Automatically generates NTLM hashes for Samba
+      - LLDAP_LDAP_OPTIONS__ENABLE_SAMBA=true
     networks:
       - media_net
 
@@ -62,7 +64,7 @@ services:
       OIDC_ISSUER: "${PRIMARY_BASE_URL}:9091"
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID}
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET}
-      # FIX: Industry-standard space-separated scopes
+      # Industry-standard space-separated scopes
       OIDC_SCOPES: "openid profile email groups"
       OIDC_AUTO_CREATE_USERS: "true"
       OIDC_ADMIN_GROUPS: "admins"
@@ -115,7 +117,7 @@ services:
       - media_net
 
   # -------------------------------------------
-  # IMMICH (Marketing Gallery)
+  # IMMICH (Marketing Gallery - Pure Viewer Mode)
   # -------------------------------------------
   immich-server:
     image: ghcr.io/immich-app/immich-server:release
@@ -132,7 +134,7 @@ services:
       - TZ=${TZ}
     volumes:
       - /docker/immich/upload:/usr/src/app/upload
-      - /data:/mnt/Data:ro
+      - /data:/mnt/Data:ro # Read-Only Bridge
     depends_on:
       - immich-redis
       - immich-db
